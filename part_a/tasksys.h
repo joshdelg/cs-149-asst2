@@ -77,8 +77,6 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         IRunnable* runnable;
         int num_total_tasks;
 
-        bool is_running;
-
         void spawnWorker(int thread_id);
 };
 
