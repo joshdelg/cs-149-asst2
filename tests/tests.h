@@ -145,7 +145,6 @@ class SimpleMultiplyTask : public IRunnable {
             int elements_per_task = (num_elements_ + num_total_tasks-1) / num_total_tasks;
             int start_el = elements_per_task * task_id;
             int end_el = std::min(start_el + elements_per_task, num_elements_);
-
             for (int i=start_el; i<end_el; i++)
                 array_[i] = multiply_task(3, array_[i]);
         }
@@ -534,7 +533,6 @@ TestResults simpleTest(ITaskSystem* t, bool do_async) {
         t->run(&second, num_tasks);
     }
     double end_time = CycleTimer::currentSeconds();
-
     // Correctness validation
     TestResults results;
     results.passed = true;
@@ -555,7 +553,6 @@ TestResults simpleTest(ITaskSystem* t, bool do_async) {
     results.time = end_time - start_time;
 
     delete [] array;
-
     return results;
 }
 
