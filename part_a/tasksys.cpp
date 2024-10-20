@@ -140,36 +140,40 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
     // If thread was already WAITING just continue WAITING
  
     while(true) {
-        this->task_ptr_mutex.lock();
+        int task_to_run = this->task_ptr.fetch_add(1);
         
-        if(this->thread_states[thread_id] == STOPPED) break;
-        
-        if(this->task_ptr < this->num_total_tasks) {
-
-            int task_to_run = this->task_ptr;
-            this->task_ptr++;
-
-            this->task_ptr_mutex.unlock();
-
+        if(task_to_run < this->num_total_tasks) {
             this->runnable->runTask(task_to_run, this->num_total_tasks);
         } else {
+            this->task_ptr_mutex.lock();
+        
             if(this->thread_states[thread_id] == RUNNING) {
                 this->completed_threads++;
                 this->thread_states[thread_id] = WAITING;
             }
+
             this->task_ptr_mutex.unlock();
+
+            while(true) {
+                this->task_ptr_mutex.lock();    
+                if(this->thread_states[thread_id] == STOPPED) {
+                    this->task_ptr_mutex.unlock();
+                    return;
+                } else if(this->thread_states[thread_id] == RUNNING) {
+                    this->task_ptr_mutex.unlock();
+                    break;
+                }
+                this->task_ptr_mutex.unlock();
+            }
         }
     }
-
-    this->task_ptr_mutex.unlock();
-    
 }
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
     // Reset thread running state
     this->task_ptr_mutex.lock();
     this->completed_threads = 0;
-    this->task_ptr = 0;
+    this->task_ptr.store(0);
     this->num_total_tasks = num_total_tasks;
     this->runnable = runnable;
 
@@ -186,7 +190,7 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
         // Reset state if they're done
         if(this->completed_threads == this->num_threads) {
             this->completed_threads = 0;
-            this->task_ptr = 0;
+            this->task_ptr.store(0);
             this->num_total_tasks = 0;
 
             for(int i = 0; i < this->num_threads; i++) {
