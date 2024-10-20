@@ -114,19 +114,37 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads), num_threads(num_threads), completed_threads(0), task_ptr(0), runnable(nullptr), num_total_tasks(0) {
     this->thread_pool = new std::thread[num_threads];
     this->thread_states = new enum ThreadState[num_threads];
+    this->thread_state_mutexes = new std::mutex[num_threads];
 
     for(int i = 0; i < num_threads; i++) {
+        this->thread_state_mutexes[i].lock();
         this->thread_states[i] = WAITING;
+        this->thread_state_mutexes[i].unlock();
+
         this->thread_pool[i] = std::thread(&TaskSystemParallelThreadPoolSpinning::spawnWorker, this, i);
     }
+
+    // Make sure all thread has reached waiting stage
+    /** while(true) {
+        this->completed_mutex.lock();
+        if(this->completed_threads == this->num_threads) {
+            this->completed_mutex.unlock();
+            break;
+        }
+        this->completed_mutex.unlock();
+    } **/
 }
 
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
     for(int i = 0; i < this->num_threads; i++) {
+        this->thread_state_mutexes[i].lock();
         this->thread_states[i] = STOPPED;
+        this->thread_state_mutexes[i].unlock();
+
         this->thread_pool[i].join();
     }
     
+    delete [] thread_state_mutexes;
     delete [] thread_states;
     delete [] thread_pool;
 }
@@ -138,32 +156,45 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
     // If there is work task_ptr < num_total_task, thread claims next one
     // Otherwise, if thread is RUNNING then change to WAITING and increment completed
     // If thread was already WAITING just continue WAITING
- 
+    
     while(true) {
-        int task_to_run = this->task_ptr.fetch_add(1);
-        
-        if(task_to_run < this->num_total_tasks) {
-            this->runnable->runTask(task_to_run, this->num_total_tasks);
-        } else {
-            this->task_ptr_mutex.lock();
-        
-            if(this->thread_states[thread_id] == RUNNING) {
-                this->completed_threads++;
-                this->thread_states[thread_id] = WAITING;
-            }
+        this->thread_state_mutexes[thread_id].lock();
+        enum ThreadState thread_state = this->thread_states[thread_id];
+        this->thread_state_mutexes[thread_id].unlock();
 
-            this->task_ptr_mutex.unlock();
+        if(thread_state != RUNNING) {
+            // printf("Thread %d state not running, entering waiting loop\n", thread_id);
 
-            while(true) {
-                this->task_ptr_mutex.lock();    
-                if(this->thread_states[thread_id] == STOPPED) {
-                    this->task_ptr_mutex.unlock();
+            while(true) { 
+                this->thread_state_mutexes[thread_id].lock();    
+                thread_state = this->thread_states[thread_id];
+                this->thread_state_mutexes[thread_id].unlock();
+
+                if(thread_state == STOPPED) {
                     return;
-                } else if(this->thread_states[thread_id] == RUNNING) {
-                    this->task_ptr_mutex.unlock();
+                } else if(thread_state == RUNNING) {
+                    // printf("Thread %d set backt o running, exiting waiting loop!\n", thread_id);
                     break;
                 }
-                this->task_ptr_mutex.unlock();
+            }
+
+        } else {
+            int task_to_run = this->task_ptr.fetch_add(1);
+            // printf("Thread %d fetching task %d\n", thread_id, task_to_run);
+            
+            if(task_to_run < this->num_total_tasks) {
+                this->runnable->runTask(task_to_run, this->num_total_tasks);
+            } else {
+                // printf("invalid task, but can't lock thread %d mutex\n", thread_id);
+                this->thread_state_mutexes[thread_id].lock();
+                // printf("Thread %d task %d out of range, updating to waiting state\n", thread_id, task_to_run);
+                this->thread_states[thread_id] = WAITING;
+                this->thread_state_mutexes[thread_id].unlock(); 
+                
+                this->completed_mutex.lock();
+                this->completed_threads++;
+                // printf("Thread %d incrementing completed threads now %d\n", thread_id, this->completed_threads);
+                this->completed_mutex.unlock();
             }
         }
     }
@@ -171,39 +202,48 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
 
 void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
     // Reset thread running state
-    this->task_ptr_mutex.lock();
     this->completed_threads = 0;
     this->task_ptr.store(0);
     this->num_total_tasks = num_total_tasks;
     this->runnable = runnable;
 
     for(int i = 0; i < this->num_threads; i++) {
+        this->thread_state_mutexes[i].lock();
         this->thread_states[i] = RUNNING;
+        this->thread_state_mutexes[i].unlock();
     }
 
-    this->task_ptr_mutex.unlock();
-
     // Wait for all threads to finish
-    while(true) {
-        this->task_ptr_mutex.lock();
-        
+    /** while(true) { 
         // Reset state if they're done
+        this->completed_mutex.lock();
         if(this->completed_threads == this->num_threads) {
             this->completed_threads = 0;
+            this->completed_mutex.unlock();
+
             this->task_ptr.store(0);
             this->num_total_tasks = 0;
-
-            for(int i = 0; i < this->num_threads; i++) {
+            // TODO: Probably don't need this
+             for(int i = 0; i < this->num_threads; i++) {
+                this->thread_state_mutexes[i].lock();
                 this->thread_states[i] = WAITING;
+                this->thread_state_mutexes[i].unlock();
             }
 
             break;
         }
+        this->completed_mutex.unlock();
+    } **/
 
-        this->task_ptr_mutex.unlock();
+    while(true) {
+        this->completed_mutex.lock();
+        int completed = this->completed_threads;
+        this->completed_mutex.unlock();
+
+        if(completed == this->num_threads) {
+            break;
+        }
     }
-
-    this->task_ptr_mutex.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
