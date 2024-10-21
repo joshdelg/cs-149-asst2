@@ -146,15 +146,15 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
     while(true) {
         // Attempt to get the next task
         int task_to_run = this->task_ptr.fetch_add(1);
-        printf("Thread %d fetched task %d\n", thread_id, task_to_run); 
+        // printf("Thread %d fetched task %d\n", thread_id, task_to_run); 
         // If no more work, set WAITING and update complete threads
         // Busy wait until new bulk task sets us to RUNNING
         if(task_to_run >= this->num_total_tasks) {
-            printf("Thread %d: Task %d is out of range (%d), updating to waiting state\n", thread_id, task_to_run, this->num_total_tasks);
+            // printf("Thread %d: Task %d is out of range (%d), updating to waiting state\n", thread_id, task_to_run, this->num_total_tasks);
 
             this->thread_states[thread_id].store(WAITING);
             int completed_threads = this->completed_threads.fetch_add(1);
-            printf("Thread %d: Compelted threads is now %d\n", thread_id, completed_threads);
+            // printf("Thread %d: Compelted threads is now %d\n", thread_id, completed_threads);
             
             bool hasStopped = false;
 
@@ -163,10 +163,10 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
                 enum ThreadState thread_state = this->thread_states[thread_id].load();
 
                 if(thread_state == RUNNING) {
-                    printf("Thread %d restarted to running!\n", thread_id);
+                    // printf("Thread %d restarted to running!\n", thread_id);
                     break;
                 } else if(thread_state == STOPPED) {
-                    printf("Thread %d restarted to stopped\n", thread_id);
+                    // printf("Thread %d restarted to stopped\n", thread_id);
                     hasStopped = true;
                     break;
                 }
@@ -198,7 +198,7 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
 
         // Reset state if they're done (threads already on WAITING)
         if(completed_threads == this->num_threads) {
-            printf("All tasks finished!\n");
+            // printf("All tasks finished!\n");
             break;
         }
     }
