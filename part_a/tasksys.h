@@ -54,8 +54,6 @@ class TaskSystemParallelSpawn: public ITaskSystem {
  * documentation of the ITaskSystem interface.
  */
 
-enum ThreadState { RUNNING, WAITING, STOPPED };
-
 class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
     public:
         TaskSystemParallelThreadPoolSpinning(int num_threads);
@@ -70,10 +68,12 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         const int num_threads;
 
         std::thread* thread_pool;
-        enum ThreadState* thread_states;
-        int completed_threads;
-        std::atomic<int> task_ptr;
-        std::mutex task_ptr_mutex;
+        
+        int task_ptr;
+        int completed_tasks;
+	
+        std::mutex thread_mutex;
+
         IRunnable* runnable;
         int num_total_tasks;
 
