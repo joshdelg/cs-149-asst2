@@ -1,4 +1,5 @@
 #include "tasksys.h"
+#include "CycleTimer.h"
 #include <thread>
 #include <mutex>
 #include <stdio.h>
@@ -7,6 +8,8 @@ IRunnable::~IRunnable() {}
 
 ITaskSystem::ITaskSystem(int num_threads) {}
 ITaskSystem::~ITaskSystem() {}
+
+#define print false
 
 /*
  * ================================================================
@@ -232,18 +235,17 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
     // If so, notify
     
     bool shouldRun = false;
+  
     while(true) {
-        std::unique_lock<std::mutex> lock(this->thread_mutex);
         
+        std::unique_lock<std::mutex> lock(this->thread_mutex);
+
         if(shouldRun) {
             shouldRun = false;
             this->completed_tasks++;
-            printf("Thread %d just finished, completed now %d\n", thread_id, this->completed_tasks);
-
             if(this->completed_tasks == this->num_total_tasks) {
-                printf("THread %d about to unlock and call notify\n", thread_id);
                 lock.unlock();
-                this->done_cv.notify_all();
+                this->done_cv.notify_one();
                 lock.lock();
             }
         }
@@ -255,20 +257,44 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
         }
 
         if(task_to_run < this->num_total_tasks) {
-            printf("Thread %d fetched valid task %d\n", thread_id, task_to_run);
             shouldRun = true;
             this->task_ptr++;
-            // TODO: Unlock here and remove down below?
         } else {
-            printf("Thread %d fetched invalid task %d, sleeping\n", thread_id, task_to_run);
             this->work_cv.wait(lock);
-            printf("Thread %d woken up!\n", thread_id);
         }
         
         lock.unlock();
 
         if(shouldRun) this->runnable->runTask(task_to_run, this->num_total_tasks);
     }
+
+    /*while(true) {
+        std::unique_lock<std::mutex> lock(this->thread_mutex);
+
+        int task_to_run = this->task_ptr;
+        
+        
+        if(task_to_run == -1) return;
+        
+        if(task_to_run < this->num_total_tasks) {
+            if(print) printf("Thread %d fetched valid task %d\n", thread_id, task_to_run);
+            this->task_ptr++;
+            lock.unlock();
+            
+            this->runnable->runTask(task_to_run, this->num_total_tasks);
+        } else {
+            if(print) printf("Thread %d fetched invalid task %d, sleeping\n", thread_id, task_to_run);
+            this->completed_tasks++;
+            if(print) printf("THread %d completed now %d\n", thread_id, this->completed_tasks);
+            if(this->completed_tasks == this->num_threads) {
+                lock.unlock();
+                this->done_cv.notify_all();
+                lock.lock();
+            }
+
+            this->work_cv.wait(lock);
+        }
+    }*/
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
@@ -278,20 +304,17 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
     this->runnable = runnable;
     
     // TODO: Probably unnecessary
+    
     std::unique_lock<std::mutex> lock(this->thread_mutex);
     this->num_total_tasks = num_total_tasks;
     this->task_ptr = 0;
     this->completed_tasks = 0;
-    printf("RUN: About to unlock and wake up all threads\n");
-    lock.unlock();
+    // lock.unlock();
 
     this->work_cv.notify_all();
     
-    lock.lock();
-    printf("RUN: about to wait until all tasks done\n");
+   // lock.lock();
     this->done_cv.wait(lock);
-    printf("All tasks done!\n");
-    lock.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
