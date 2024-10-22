@@ -68,14 +68,15 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
 
     private:
         const int num_threads;
-
         std::thread* thread_pool;
-        enum ThreadState* thread_states;
+        
+        std::mutex state_mutex;
         int completed_threads;
-        std::atomic<int> task_ptr;
-        std::mutex task_ptr_mutex;
-        IRunnable* runnable;
+        int task_ptr;
         int num_total_tasks;
+        int bulk_task_id;
+        
+        IRunnable* runnable; 
 
         void spawnWorker(int thread_id);
 };
