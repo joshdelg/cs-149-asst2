@@ -1,5 +1,6 @@
 #include "tasksys.h"
 #include <thread>
+#include <mutex>
 #include <stdio.h>
 
 IRunnable::~IRunnable() {}
@@ -155,9 +156,9 @@ void TaskSystemParallelThreadPoolSpinning::spawnWorker(int thread_id) {
 
         this->thread_mutex.unlock();
 
-            if(shouldRun) {
-                this->runnable->runTask(task_to_run, this->num_total_tasks);
-            }
+        if(shouldRun) {
+            this->runnable->runTask(task_to_run, this->num_total_tasks);
+        }
     } 
 }
 
@@ -204,36 +205,93 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
     return "Parallel + Thread Pool + Sleep";
 }
 
-TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads), num_threads(num_threads), num_total_tasks(0), task_ptr(0), completed_tasks(0), runnable(nullptr) {
+    this->thread_pool = new std::thread[num_threads];
+
+    for(int i = 0; i < num_threads; i++) {
+        this->thread_pool[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::spawnWorker, this, i);
+    }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    std::unique_lock<std::mutex> lock(this->thread_mutex);
+    this->task_ptr = -1;
+    lock.unlock();
+    this->work_cv.notify_all();
+
+    for(int i = 0; i < this->num_threads; i++) {
+        this->thread_pool[i].join();
+    }
+   
+    delete [] thread_pool;
+}
+
+void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
+    // Wait until notified there is work, loop while claiming
+    // Whenever finishes a task, check if == num_total_tasks
+    // If so, notify
+    
+    bool shouldRun = false;
+    while(true) {
+        std::unique_lock<std::mutex> lock(this->thread_mutex);
+        
+        if(shouldRun) {
+            shouldRun = false;
+            this->completed_tasks++;
+            printf("Thread %d just finished, completed now %d\n", thread_id, this->completed_tasks);
+
+            if(this->completed_tasks == this->num_total_tasks) {
+                printf("THread %d about to unlock and call notify\n", thread_id);
+                lock.unlock();
+                this->done_cv.notify_all();
+                lock.lock();
+            }
+        }
+
+        int task_to_run = this->task_ptr;
+        if(task_to_run == -1) {
+            lock.unlock();
+            return;
+        }
+
+        if(task_to_run < this->num_total_tasks) {
+            printf("Thread %d fetched valid task %d\n", thread_id, task_to_run);
+            shouldRun = true;
+            this->task_ptr++;
+            // TODO: Unlock here and remove down below?
+        } else {
+            printf("Thread %d fetched invalid task %d, sleeping\n", thread_id, task_to_run);
+            this->work_cv.wait(lock);
+            printf("Thread %d woken up!\n", thread_id);
+        }
+        
+        lock.unlock();
+
+        if(shouldRun) this->runnable->runTask(task_to_run, this->num_total_tasks);
+    }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
+    // Call notify_all
+    // Main thread waits until notified that completed_tasks = num_total_tasks
 
+    this->runnable = runnable;
+    
+    // TODO: Probably unnecessary
+    std::unique_lock<std::mutex> lock(this->thread_mutex);
+    this->num_total_tasks = num_total_tasks;
+    this->task_ptr = 0;
+    this->completed_tasks = 0;
+    printf("RUN: About to unlock and wake up all threads\n");
+    lock.unlock();
 
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
+    this->work_cv.notify_all();
+    
+    lock.lock();
+    printf("RUN: about to wait until all tasks done\n");
+    this->done_cv.wait(lock);
+    printf("All tasks done!\n");
+    lock.unlock();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,

@@ -4,7 +4,7 @@
 #include "itasksys.h"
 #include <thread>
 #include <mutex>
-#include <atomic>
+#include <condition_variable>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -95,6 +95,23 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+    
+    private:
+        const int num_threads;
+        
+        int num_total_tasks;
+        int task_ptr;
+        int completed_tasks;
+
+        std::thread* thread_pool;
+
+        std::mutex thread_mutex;
+        std::condition_variable work_cv;
+        std::condition_variable done_cv;
+        
+        IRunnable* runnable;
+
+        void spawnWorker(int thread_id);
 };
 
 #endif
