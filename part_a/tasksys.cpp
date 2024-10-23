@@ -237,13 +237,13 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
     bool shouldRun = false;
   
     while(true) {
-        
         std::unique_lock<std::mutex> lock(this->thread_mutex);
 
         if(shouldRun) {
             shouldRun = false;
-            this->completed_tasks++;
-            if(this->completed_tasks == this->num_total_tasks) {
+            int completed = this->completed_tasks++;
+            // printf("Thread %d finished task, incrementing compled to %d\n", thread_id, completed + 1);
+	    if(this->completed_tasks == this->num_total_tasks) {
                 this->done_cv.notify_one();
             }
         }
@@ -253,17 +253,19 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
             return;
         }
 
+	// printf("Thread %d claimed task %d\n", thread_id, task_to_run);
         if(task_to_run < this->num_total_tasks) {
             shouldRun = true;
             this->task_ptr++;
+	    // printf("Thread %d claimd valid task %d, incrementing\n", thread_id, task_to_run);
 
             lock.unlock();
-        } else {
-            this->work_cv.wait(lock);
-        }
-        
 
-        if(shouldRun) this->runnable->runTask(task_to_run, this->num_total_tasks);
+	    this->runnable->runTask(task_to_run, this->num_total_tasks);
+        } else {
+	    // printf("Thread %d preparing to sleep, invalid task %d\n", thread_id, task_to_run);
+            this->work_cv.wait(lock);
+        }        
     }
   
   
