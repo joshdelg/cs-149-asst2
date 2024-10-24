@@ -233,9 +233,9 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
     // If so, notify
 
 
-    std::unique_lock<std::mutex> lock(this->thread_mutex);
-    this->work_cv.wait(lock, [this] { return this->task_ptr < this->num_total_tasks || this->done; });
-    lock.unlock();
+    // std::unique_lock<std::mutex> lock(this->thread_mutex);
+    // this->work_cv.wait(lock, [this] { return this->task_ptr < this->num_total_tasks || this->done; });
+    // lock.unlock();
     while(!this->done) {
         std::unique_lock<std::mutex> lock(this->thread_mutex);
         //lock.lock();
