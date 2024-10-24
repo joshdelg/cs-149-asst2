@@ -232,16 +232,18 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
     // Whenever finishes a task, check if == num_total_tasks
     // If so, notify
 
+
+    std::unique_lock<std::mutex> lock(this->thread_mutex);
+    this->work_cv.wait(lock, [this] { return this->task_ptr < this->num_total_tasks || this->done; });
+    lock.unlock();
     while(!this->done) {
         std::unique_lock<std::mutex> lock(this->thread_mutex);
-        
+        //lock.lock();
         // if(this->task_ptr >= this->num_total_tasks) {
         this->work_cv.wait(lock, [this] { return this->task_ptr < this->num_total_tasks || this->done; });
         // }
-
-        int task_to_run = this->task_ptr;
-        this->task_ptr++;
-        lock.unlock();
+	lock.unlock();
+        int task_to_run = this->task_ptr.fetch_add(1);
         
         if(task_to_run < this->num_total_tasks) {
             this->runnable->runTask(task_to_run, this->num_total_tasks);

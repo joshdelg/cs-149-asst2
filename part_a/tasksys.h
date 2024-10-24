@@ -101,7 +101,7 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         const int num_threads;
         
         int num_total_tasks;
-        int task_ptr;
+	std::atomic<int> task_ptr;
         bool done;
         std::atomic<int> completed_tasks;
 
