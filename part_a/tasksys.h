@@ -5,6 +5,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <atomic>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -101,7 +102,8 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         
         int num_total_tasks;
         int task_ptr;
-        int completed_tasks;
+        bool done;
+        std::atomic<int> completed_tasks;
 
         std::thread* thread_pool;
 

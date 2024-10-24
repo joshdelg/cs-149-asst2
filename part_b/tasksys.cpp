@@ -126,22 +126,55 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
     return "Parallel + Thread Pool + Sleep";
 }
 
-TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads), task_ptr(0) {
+   this->thread_pool = new std::thread[num_threads];
+
+   for(int i = 0; i < num_threads; i++) {
+       thread_pool[i] = std::thread(&TaskSystemParallelThreadPoolSleeping::spawnWorker, this, i);
+   }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    this->thread_mutex.lock();
+    this->task_ptr = -1;
+    this->thread_mutex.unlock();
+
+    for(int i = 0; i < num_threads; i++) {
+        thread_pool[i].join();
+    }
+
+    delete [] thread_pool;
+    
+}
+
+void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
+    while(true) {
+        std::unique_lock<std::mutex> lock(this->thread_mutex);
+        
+        // First, check if the task is empty and sleep immediately
+        if(this->ready_tasks.empty()) {
+            this->work_cv.wait(lock);    
+        }
+        
+        TaskID next_bulk_task_id = this->ready_tasks.front();
+        BulkLaunch& next_bulk_task = this->bulk_tasks[next_bulk_task_id];
+
+        int task_to_run = this->task_ptr;
+        
+        if(task_to_run < next_bulk_task.num_total_tasks) {
+            this->task_ptr++;
+            // Run the task
+            lock.unlock();
+            next_bulk_task.runnable->runTask(task_to_run, next_bulk_task.num_total_tasks); 
+            lock.lock();
+
+            // Increment completed and check if task done
+        } else if(task_to_run == next_bulk_task.num_total_tasks) {
+            // Check if we're done with tasks on this bulk launch, pop and reset tasks to 0
+            this->next_bulk_task.pop();
+            this->task_ptr = 0;
+        }
+    }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
