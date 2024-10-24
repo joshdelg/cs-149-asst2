@@ -126,7 +126,7 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
     return "Parallel + Thread Pool + Sleep";
 }
 
-TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads), task_ptr(0) {
+TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads), task_ptr(0), done(false), num_threads(num_threads) {
    this->thread_pool = new std::thread[num_threads];
 
    for(int i = 0; i < num_threads; i++) {
@@ -135,11 +135,9 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    this->thread_mutex.lock();
-    this->task_ptr = -1;
-    this->thread_mutex.unlock();
+    this->done = true;
 
-    for(int i = 0; i < num_threads; i++) {
+    for(int i = 0; i < this->num_threads; i++) {
         thread_pool[i].join();
     }
 
@@ -147,8 +145,39 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
     
 }
 
+void TaskSystemParallelThreadPoolSleeping::enqueueReadyBulkTasks() {
+    // Linear scan through all bulk tasks
+    // If the task is not already complete:
+    // Check if all their dependencies have now completed
+    // If so, enqueue to ready tasks
+    // Also, check if all tasks in bulk tasks are done, if so, wake up sync
+    
+    bool allBulkTasksCompleted = true;
+    for(BulkTask& bulk_task : this->bulk_tasks) {
+        
+        if(bulk_task.completed_tasks != bulk_task.num_total_tasks) {
+            allBulkTasksCompleted = false;
+
+            bool allDepsCompleted = true;
+            for(TaskID dep : bulk_task.deps) {
+                if(this->bulk_tasks[dep].completed_tasks != this->bulk_tasks[dep].num_total_tasks) {
+                    allDepsCompleted = false;
+                }
+            }
+
+            if(allDepsCompleted) {
+                this->ready_tasks.push(bulk_task.bulk_id);
+            }
+        }
+    }
+    
+    if(allBulkTasksCompleted) {
+        this->sync_cv.notify_all();
+    }
+}
+
 void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
-    while(true) {
+    while(!this->done) {
         std::unique_lock<std::mutex> lock(this->thread_mutex);
         
         // First, check if the task is empty and sleep immediately
@@ -157,7 +186,7 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
         }
         
         TaskID next_bulk_task_id = this->ready_tasks.front();
-        BulkLaunch& next_bulk_task = this->bulk_tasks[next_bulk_task_id];
+        BulkTask& next_bulk_task = this->bulk_tasks[next_bulk_task_id];
 
         int task_to_run = this->task_ptr;
         
@@ -169,48 +198,51 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
             lock.lock();
 
             // Increment completed and check if task done
+            next_bulk_task.completed_tasks++;
+            if(next_bulk_task.completed_tasks == next_bulk_task.num_total_tasks) {
+                // Do logic for checking for other ready bulks
+                this->enqueueReadyBulkTasks();
+            }
         } else if(task_to_run == next_bulk_task.num_total_tasks) {
             // Check if we're done with tasks on this bulk launch, pop and reset tasks to 0
-            this->next_bulk_task.pop();
+            this->ready_tasks.pop();
             this->task_ptr = 0;
         }
     }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
-
-
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
+    std::vector<TaskID> nodeps;
+    
+    this->runAsyncWithDeps(runnable, num_total_tasks, nodeps);
+    this->sync();
 }
 
-TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
-                                                    const std::vector<TaskID>& deps) {
+TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks, const std::vector<TaskID>& deps) {
+    // Append bulk task struct to vector
+    std::unique_lock<std::mutex> lock(this->thread_mutex);
 
+    TaskID new_task_id = (this->bulk_tasks.size() == 0) ? 0 : this->bulk_tasks.back().bulk_id + 1;
+    this->bulk_tasks.emplace_back(new_task_id, num_total_tasks, runnable, deps);
 
-    //
-    // TODO: CS149 students will implement this method in Part B.
-    //
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
-
-    return 0;
+    this->work_cv.notify_all();
+    
+    return new_task_id;
 }
 
 void TaskSystemParallelThreadPoolSleeping::sync() {
+    // Check if all tasks in queue are done, otherwise, wait
+    std::unique_lock<std::mutex> lock(this->thread_mutex);
+    
+    bool allBulkTasksDone = true;
+    for(BulkTask& bulk_task : this->bulk_tasks) {
+        if(bulk_task.num_total_tasks != bulk_task.completed_tasks) {
+            allBulkTasksDone = false;
+            break;
+        }
+    }
 
-    //
-    // TODO: CS149 students will modify the implementation of this method in Part B.
-    //
+    if(allBulkTasksDone) return;
 
-    return;
+    this->sync_cv.wait(lock);
 }

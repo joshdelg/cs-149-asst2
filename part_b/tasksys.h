@@ -6,6 +6,8 @@
 #include <queue>
 #include <mutex>
 #include <thread>
+#include <condition_variable>
+
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -74,26 +76,31 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         void sync();
 
     private:
-        struct BulkLaunch {
+        struct BulkTask {
             TaskID bulk_id;
             int num_total_tasks;
             int completed_tasks;
             IRunnable* runnable;
 
-            std::vector<TaskID> deps;
-        }
+            const std::vector<TaskID>& deps;
+
+            inline BulkTask(TaskID bulk_id, int num_total_tasks, IRunnable* runnable, const std::vector<TaskID>& deps) : bulk_id(bulk_id), num_total_tasks(num_total_tasks), completed_tasks(0), runnable(runnable), deps(deps) {};
+        };
 
         int task_ptr;
+        bool done;
+        const int num_threads;
 
-        std::vector<BulkLaunch> bulk_tasks;
+        std::vector<BulkTask> bulk_tasks;
         std::queue<TaskID> ready_tasks;
 
         std::thread* thread_pool;
         
         std::mutex thread_mutex;
         std::condition_variable work_cv;
-        std::condition_variable wait_cv;
-
+        std::condition_variable sync_cv;
+        
+        void enqueueReadyBulkTasks();
         void spawnWorker(int thread_id);
 };
 
