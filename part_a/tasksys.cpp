@@ -231,7 +231,6 @@ void TaskSystemParallelThreadPoolSleeping::spawnWorker(int thread_id) {
     // Wait until notified there is work, loop while claiming
     // Whenever finishes a task, check if == num_total_tasks
     // If so, notify
-    //
 
     while(!this->done) {
         std::unique_lock<std::mutex> lock(this->thread_mutex);
